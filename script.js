@@ -466,8 +466,8 @@ class MediaAvatar extends Croquet.View {
                         }
                     });
                 } else if (requestReciprocolIfNecessary) {
-                    this.negotiationneeded();
-                    //FIXME this.p2pSend('requestInitialization', streamKind);
+                    //FIXME this.negotiationneeded();
+                    this.p2pSend('requestInitialization', streamKind);
                 }
                 return stream;
             });

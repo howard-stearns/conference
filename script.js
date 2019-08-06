@@ -1,13 +1,10 @@
 'use strict';
 /*
 TODO:
-- Sort out when updateStreamInfo starts/stops (including isMyself)
-- when the other end stops, disable this end's track buttons - maybe different for !track.enabled vs track.onended
+- late arrivals do not see share screens in progress
+- just show connection status in "status". No point in duplicating what is in icons
 
 - don't display screenshare unless it's in use
-- status/buttons as hover/press overlay instead of below?
-- get rid of margins/borders
-- swipe through on mobile
 - toggle any video to be big
 
 - change your name
@@ -18,7 +15,7 @@ TODO:
 - code review: methods are verbs, properties are nouns
 - code review: andreas-annotation
 - code review: consolidate trackKind <=> streamKind conversions
-- code review: fixmesafter_save :send_welcome_email, :if => proc { |u| u.email.present? && u.confirmed_at_changed? && u.confirmed_at_was.nil? && !u.unconfirmed_email.present? }
+- code review: put each logging category through paces individually, and see if they make sense
 - more ice servers, and CHECK THEM
 - tooltips
 - license in github
@@ -44,14 +41,14 @@ const LOGGING = [
     //'JOIN',
     //'EXIT',
     'STATUS',
-    'construct',
-    'negotiationneeded',
-    'offer',
+    //'construct',
+    //'negotiationneeded',
+    //'offer',
     //'icecandidate',
-    'answer',
-    'requestInitialization',
-    'stream',
-    'track'
+    //'answer',
+    //'requestInitialization',
+    //'stream',
+    //'track'
 ];
 // Like console.log, but conditional on whether the first arg appears in the list above.
 function log(key, ...rest) {
@@ -108,7 +105,7 @@ class MeetingModel extends Croquet.Model {
     }
 
     // Utilities
-    findCurrentUser(id) { // If it answer's falsey, that id has already exited.
+    findCurrentUser(id) { // If it answers falsey, that id has already exited.
         return this.users.get(id);
     }
     escape(text) {
@@ -121,7 +118,7 @@ class MeetingModel extends Croquet.Model {
 }
 MeetingModel.register();
 
-// Trampolines the RTC signalling messages from a View in one browser, do a different View in another browser.
+// Trampolines the RTC signalling messages from a View in one browser, to a different View in another browser.
 class UserModel extends Croquet.Model {
     init(options = {}) {
         super.init(options);
@@ -139,8 +136,9 @@ class UserModel extends Croquet.Model {
         // such that model.screen, model.video, and model.audio is either a stream.id or falsey.
         // (A webrtc stream.id is globally unique, and the same on each end of the RTCPeerConnection.
         // But track.id is different in each browser, and thus useless for cross-browser communication.)
+        log('stream', 'updateStreamInfo', this.name, info.trackKind, !!info.id);
         this[info.trackKind] = info.id;
-        this.publish(this.userId, 'setTrackAvailable', info.trackKind);
+        this.publish(this.userId, 'showTrackAvailableLocally', info.trackKind);
     }
     // Trampolines to this user's avatar.
     offer(payload) { this.publish(this.userId, 'tramp-offer', payload); }
@@ -167,7 +165,6 @@ class MeetingView extends Croquet.View {
     constructor(model) { // Set up the room-wide display, handlers, and subscriptions.
         super(model);
         this.model = model;
-        this.toggleAbout();
         this.refreshHistory();
         this.mediaAvatars = new Map();
 
@@ -176,8 +173,9 @@ class MeetingView extends Croquet.View {
         this.subscribe('history', 'refresh', this.refreshHistory);
 
         sendButton.onclick = () => this.send();
-        closeButton.onclick = () => this.toggleAbout();
+        aboutCloseButton.onclick = () => this.toggleAbout();
         openButton.onclick = () => this.toggleAbout();
+        noticeCloseButton.onclick = () => this.toggleNotice();
 
         // The model.users has each current user in order, up to the last snapshot.
         // Here we addUser for each, and then we will addUser for each user who has joined since the snapshot.
@@ -215,7 +213,11 @@ class MeetingView extends Croquet.View {
     }
     toggleAbout() { // Button handler to open/close the modal "about" dialog.
         about.classList.toggle('closed');
-        aboutOverlay.classList.toggle('closed');
+        modalOverlay.classList.toggle('closed');
+    }        
+    toggleNotice() { // Button handler to open/close the modal "about" dialog.
+        notice.classList.toggle('closed');
+        modalOverlay.classList.toggle('closed');
     }        
     refreshHistory() { // Utiltiy for text chat change.
         const user = this.model.findCurrentUser(this.viewId); // Until addUser of myself, name is not known.
@@ -245,17 +247,17 @@ class MeetingView extends Croquet.View {
             constraints = {};
         } else {
             getter = 'getUserMedia';
-            constraints = {video: true, audio: true}
+            constraints = {video: true, audio: false} // fixme
         }
 
         if (!navigator.mediaDevices[getter]) { // Browser feature-detect.
             myAvatar.updateStatus(streamKind + " unsupported");
             // This should be the only place we disable the buttons for my avatar.
-            if (streamKind == 'screen') {
-                myAvatar.setTrackAvailable('screen', false);
+            if (streamKind === 'screen') {
+                myAvatar.showTrackAvailableLocally('screen', false);
             } else {
-                myAvatar.setTrackAvailable('video', false);
-                myAvatar.setTrackAvailable('audio', false);
+                myAvatar.showTrackAvailableLocally('video', false);
+                myAvatar.showTrackAvailableLocally('audio', false);
             }
             return this[streamKind] = Promise.resolve(null);
         }
@@ -266,10 +268,7 @@ class MeetingView extends Croquet.View {
                 // A browser might allow the user to deny the whole stream, or any track.
                 if (!stream) return;
                 stream.getTracks().forEach(track => {
-                    this.publish(this.viewId, 'updateStreamInfo', {
-                        trackKind: isScreen ? 'screen' : track.kind,
-                        id: stream.id
-                    });
+                    this.updateStreamInfo(stream.id, track.kind, streamKind);
                     // A browser may allow the user to stop the stream later, in
                     // which case we will receive onended for each track.
                     track.onended = () => myAvatar.stopStream(stream, streamKind);
@@ -280,6 +279,12 @@ class MeetingView extends Croquet.View {
                 this.resetBrowserStream(streamKind);
                 myAvatar.updateStatus(exception.name, exception.message);
             });
+    }
+    updateStreamInfo(streamId, trackKind, streamKind) { // Publish it, adjusting trackKind for streamKind.
+        this.publish(this.viewId, 'updateStreamInfo', {
+            trackKind: isScreenShare(streamKind) ? 'screen' : trackKind,
+            id: streamId
+        });
     }
     resetBrowserStream(streamKind) {
         // The idea is to not re-ask the user after denying permission (caching above), and
@@ -332,25 +337,14 @@ class MediaAvatar extends Croquet.View {
             // So turn sound off at the element.
             // TODO: volume slider for playback of everyone else. Our volume slider should attenuate/boost the outgoing audio track, with a test mode.
             this.webcamElement.volume = 0;
-            // FIXME
-            //this.startVideo(); //works, but if you don't say yes, other streams don't start
-            //this.allowTrack('video', true); //same as above
-            //setTimeout(() => this.meeting.shareAll('webcam'), 0);
         } else {
+            ['screen', 'audio', 'video'].forEach(trackKind =>
+                                                 this.showTrackAvailableLocally(trackKind, this.model[trackKind]));
             this.setupPeerConnection();
-            this.subscribe(this.model.userId, 'setTrackAvailable', this.setTrackAvailable);
+            // Subtle: Don't subscribe to my own showTrackAvailableLocally event, as that is ONLY disabled by feature detection.
+            // Some browsers, at least, let you try again after initially saying no, without reloading, so we initial refusal should not disable them.
+            this.subscribe(this.model.userId, 'showTrackAvailableLocally', this.showTrackAvailableLocally);
         }
-        /* FIXME
-        if (shouldInitializeConnectionWithThisUser) {
-            // Ask for userMedia. If the user agrees, that will add tracks, which triggers negotiation.
-            this.connectStream('webcam', true).then(stream => {
-                // But if we do NOT have a stream, we won't get the other guys stream, if any. So request it.
-                // (Making an offer without a stream doesn't work, because the peer doesn't generate icecandidates until there's a stream.)
-                stream || this.isMyself || !this.findCurrentUser() || this.p2pSend('requestInitialization', 'webcam');
-            });
-        }
-        this.connectStream('screen'); // Adds screen sharing track from this browser IFF it's already being shared to others.
-        */
     }
     bye() { // Clean up when this user leaves.
         log('EXIT', this.model.name);
@@ -369,6 +363,37 @@ class MediaAvatar extends Croquet.View {
     }
 
     // DOM INTERACTIONS
+    updateStatus(label, more) { // As signalling state changes, records progress in display and console.
+        log('STATUS', this.model.name, label, more);
+        this.status.innerHTML = label;
+    }
+    showTrackPlayingLocally(trackKind, enabled) { // Toggle the video/audio/screen start/stop pair to be displayed, using css.
+        this.element.classList[enabled ? 'add' : 'remove'](trackKind);
+    }
+    showTrackAvailableLocally(trackKind, enabled = this.model[trackKind]) { // Enable the track buttons IFF it's available to us.
+        log('track', 'local', trackKind, enabled, this.name());
+        const capitalized = trackKind.charAt(0).toUpperCase() + trackKind.slice(1),
+              domElement = this.element;
+        this.getButton('start' + capitalized, domElement).disabled = !enabled;
+        this.getButton('stop' + capitalized, domElement).disabled = !enabled;    
+    }
+    displayStream(stream, streamKind) { // Wire a stream to the correct display, and update local status/icons.
+        log('stream', 'display', streamKind, stream ? stream.id : 'EMPTY!', this.name());
+        if (isScreenShare(streamKind)) {
+            this.screenElement.srcObject = stream;
+            this.showTrackPlayingLocally('screen', !!stream);
+        } else {
+            this.webcamElement.srcObject = stream;
+            if (stream) {
+                stream.getTracks().forEach(track => this.showTrackPlayingLocally(track.kind, track.enabled));
+            } else {
+                this.showTrackPlayingLocally('video', false);
+                this.showTrackPlayingLocally('audio', false);
+            }
+        }
+        this.updateStatus(streamKind, stream ? stream.getTracks().length + " track(s)" : "off");
+    }
+    
     copyTemplate(domElement) {
         // I'd like to imagine that that everything the css stylist needs to know is in the .html,
         // and that there's no need to slog through the .js.
@@ -379,45 +404,11 @@ class MediaAvatar extends Croquet.View {
         element.classList.remove('template');
         return element;
     }
-    updateStatus(label, more) { // As signalling state changes, records progress in display and console.
-        log('STATUS', this.model.name, label, more);
-        this.status.innerHTML = label;
-    }
-    indicateTrack(trackKind, enabled) { // Toggle the video/audio/screen start/stop pair to be displayed, using css.
-        this.element.classList[enabled ? 'add' : 'remove'](trackKind);
-    }
-    getButton(className, domElement) {
+    getButton(className, domElement) { // Finds the DOM element under the given one, that has the given className.
         return domElement.getElementsByClassName(className)[0];
-    }
-    setTrackAvailable(trackKind, enabled = this.model[trackKind]) {
-        log('track', trackKind, enabled, this.name());
-        const capitalized = trackKind.charAt(0).toUpperCase() + trackKind.slice(1),
-              domElement = this.element;
-        this.getButton('start' + capitalized, domElement).disabled = !enabled;
-        this.getButton('stop' + capitalized, domElement).disabled = !enabled;    
-    }
-    displayStream(stream, streamKind) { // Wire a stream to the correct display (and update status).
-        log('stream', 'display', streamKind, stream ? stream.id : 'EMPTY!', this.name());
-        if (isScreenShare(streamKind)) {
-            this.screenElement.srcObject = stream;
-            this.indicateTrack('screen', stream);
-        } else {
-            this.webcamElement.srcObject = stream;
-            if (stream) {
-                stream.getTracks().forEach(track => this.indicateTrack(track.kind, track.enabled));
-            } else {
-                this.indicateTrack('video', false);
-                this.indicateTrack('audio', false);
-            }
-        }
-        this.updateStatus(streamKind, stream ? stream.getTracks().length + " track(s)" : "off");
     }
     buttonHandlerByClassName(className, domElement) { // Wires a click handler to domElement child having className
         const element = this.getButton(className, domElement);
-        if (this.isMyself) {
-            const getter = className.includes('Screen') ? 'getDisplayMedia' : 'getUserMedia';
-            if (!navigator.mediaDevices[getter]) element.disabled = true;
-        }
         element.onclick = event => this[className](event)
     }
     // Track button handlers.
@@ -437,7 +428,8 @@ class MediaAvatar extends Croquet.View {
         this.allowTrack('screen', true);
     }
     stopScreen() {
-        this.connectStream('screen').then(stream => stream && this.stopStream(stream, 'screen'));
+        this.allowTrack('screen', false);
+        // FIXME remove: this.connectStream('screen').then(stream => stream && this.stopStream(stream, 'screen'));
     }
 
     // MEDIA
@@ -451,10 +443,13 @@ class MediaAvatar extends Croquet.View {
         return this.meeting
             .getBrowserStream(streamKind, force)
             .then(stream => {
-                if (this.isMyself) {
-                    this.displayStream(stream, streamKind);
-                } else if (!this.findCurrentUser()) {
+                if (!this.findCurrentUser()) {
                     return;
+                } else if (this.isMyself) {
+                    this.displayStream(stream, streamKind);
+                    if (stream) {
+                        stream.getTracks().forEach(track => this[isScreenShare(streamKind) ? 'screen' : track.kind] = track.id);
+                    }
                 } else if (stream) { // Add the tracks to the peer connection (which might trigger negotiatiation).
                     const peer = this.connection;
                     const tracks = stream.getTracks();
@@ -466,37 +461,38 @@ class MediaAvatar extends Croquet.View {
                         }
                     });
                 } else if (requestReciprocolIfNecessary) {
-                    //FIXME this.negotiationneeded();
-                    this.p2pSend('requestInitialization', streamKind);
+                    this.meeting.toggleNotice();
+                    // FIXME this.p2pSend('requestInitialization', streamKind);
                 }
                 return stream;
             });
     }
-    requestInitialization(streamKind) {
-        // If the other end cannot safely make an offer (e.g., user has denied media), it may request us to
-        // initialize the stream (which we will do IFF we have one).
-        this.connectStream(streamKind);
-    }
-    stopStream(stream, streamKind) {
+    stopStream(stream, streamKind) { // ... and update everything, including the model
         log('stream', 'stopStream', streamKind, stream);
         if (!this.meeting.resetBrowserStream(streamKind)) return; // already cleared
         // stop all the tracks on this stream
-        stream.getTracks().forEach(track => track.stop());
+        stream.getTracks().forEach(track => {
+            this.meeting.updateStreamInfo(false, track.kind, streamKind);
+            track.stop();
+        });
         this.displayStream(null, streamKind); // allows stream to be released
     }
     allowTrack(trackKind, enabled) { // stopping and restarting video/audio/screen
-        function perTrack(track) {
-            if (track.kind === trackKind) {
+        const perTrack = (track) => {
+            if (track.id === this[trackKind]) {
                 track.enabled = enabled;
             }
         }
-        log('stream', 'allowTrack', trackKind, enabled, this.name());
+        log('track', 'allowTrack', trackKind, enabled, this.name());
         if (this.isMyself) { // Special case for our own avatar, which doesn't have a peer connection.
             const streamKind = isScreenShare(trackKind) ? 'screen' : 'webcam';
             this.connectStream(streamKind).then(existingStream => {
-                if (existingStream) { // Turn it on off at the stream, so that it effects everyone.
+                if (existingStream) {
+                    // FIXME: consider this.stopStream(stream, streamKind) to turn the damn light off (and then re-enable audio if appropriate).
+                    // Turn it on off at the stream, so that it effects everyone, but don't tear down stream.                    
                     existingStream.getTracks().forEach(perTrack);
-                    this.indicateTrack(trackKind, enabled);
+                    this.showTrackPlayingLocally(trackKind, enabled);
+                    this.meeting.updateStreamInfo(enabled && existingStream.id, trackKind, streamKind);
                 } else if (enabled) { // No existing stream because it's been shut down (e.g, by user action in browser).
                     this.meeting.shareAll(streamKind); // Restart/attach for all existing users
                 } else { // Shouldn't happen, but let's make sure the display matches
@@ -506,8 +502,13 @@ class MediaAvatar extends Croquet.View {
         } else { // Other user's avatars, just frob this local peer receiver that is hooked to this display.
             const receivers = this.connection.getReceivers();
             receivers.forEach(receiver => perTrack(receiver.track));
-            this.indicateTrack(trackKind, enabled && receivers.length);
+            this.showTrackPlayingLocally(trackKind, enabled && receivers.length);
         }
+    }
+    requestInitialization(streamKind) {
+        // If the other end cannot safely make an offer (e.g., user has denied media), it may request us to
+        // initialize the stream (which we will do IFF we have one).
+        this.connectStream(streamKind);
     }
 
     // P2P MESSAGING
@@ -538,7 +539,7 @@ class MediaAvatar extends Croquet.View {
         this.connection.addIceCandidate(iceCandidate).catch(e => console.error('CONNECTION ADD ICE FAILED', e.name, e.message));
     }
     negotiationneeded() { // When we add a track (not just toggling enable), we get this event to start the signalling process.
-        log('stream', 'negotiationneeded', this.name());
+        log('negotiationneeded', this.name());
         const peer = this.connection;
         var offer;
         peer.createOffer({})
@@ -582,9 +583,9 @@ class MediaAvatar extends Croquet.View {
             if (connection.connectionState === 'closed') {
                 message.push('closed');
             } else {
-                connection.getRemoteStreams().forEach(info);
+                connection.getRemoteStreams().forEach(info); // FIXME deprecated
                 message.push('local:');
-                connection.getLocalStreams().forEach(info);
+                connection.getLocalStreams().forEach(info); // FIXME deprecated
             }
             this.updateStatus(connection.connectionState, message.join(' '));
         });
@@ -605,8 +606,11 @@ class MediaAvatar extends Croquet.View {
             log('track', 'acrossPeer', track.kind, stream.id, this.name());
             if (stream.id === this.model[track.kind]) {
                 this.displayStream(stream, 'webcam');
+                // Yuck: set up a trackKind => local track.id map analogous to model[streamKind] => global stream.id
+                this[track.kind] = track.id;
             } else if (stream.id === this.model.screen) {
                 this.displayStream(stream, 'screen');
+                this.screen = track.id; // as with above comment.
             } else { // We may have to stash and pick up later from out of order messaging between rtc and croquet.
                 console.error('FIXME: COULD NOT IDENTIFY PLAYER FOR TRACK. stream:', stream.id,
                               'trackKind:', track.kind,

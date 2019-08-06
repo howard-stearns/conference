@@ -24,6 +24,7 @@
         <video class="webcam" autoplay playsinline poster="http://simpleicon.com/wp-content/uploads/user1.png"></video>
         <div>
           <span class="name"></span>
+
           <button class="startVideo"><i class="material-icons"></i></button>
           <button class="stopVideo"><i class="material-icons"></i></button>
 
@@ -39,9 +40,25 @@
       </div>
     </div>
 
-    <div id="aboutOverlay"></div>
-    <div id="about">
-      <button id="closeButton">Done</button>
+    <div id="modalOverlay" class="closed"></div>
+
+    <div id="notice" class="closed">
+      <button id="noticeCloseButton">Done</button>
+      <div id="noticeContent">
+        <p>
+          This is a demonstration of video conferencing and screen-sharing.
+        </p>
+        <p>
+          To use it, you will want to use your camera and microphone in the following dialog.
+        </p>
+        <p>
+          In some browsers, if you reject the use of media, you will need to reload the page if you change your mind.
+        </p>
+      </div>
+    </div>
+
+    <div id="about" class="closed">
+      <button id="aboutCloseButton">Done</button>
       <div id="aboutContent">
         <h1>Conference</h1>
         <h3>What?</h3>

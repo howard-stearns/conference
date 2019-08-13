@@ -16,9 +16,13 @@ video {
 .user.video button.startVideo,
 .user.audio button.startAudio,
 .user.screen button.startScreen,
+.user.connection button.startConnection,
+.user.myself button.startConnection,
+.user.myself button.stopConnection,
 .user:not(.video) button.stopVideo,
 .user:not(.audio) button.stopAudio,
 .user:not(.screen) button.stopScreen,
+.user:not(.connection) button.stopConnection,
 .template,
 .closed { display: none }
 
@@ -31,6 +35,8 @@ button.startAudio > i:after { content: "mic" }
 button.stopAudio > i:after { content: "mic_off" }
 button.startScreen > i:after { content: "screen_share" }
 button.stopScreen > i:after { content: "stop_screen_share" }
+
+.notImplemented { color: gray; text-decoration: line-through }
 
 /* All of the rest is for the about and notice dialogs. */
 /* Thanks to https://css-tricks.com/considerations-styling-modal/ */

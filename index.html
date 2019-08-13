@@ -34,7 +34,9 @@
           <button class="startScreen"><i class="material-icons"></i></button>
           <button class="stopScreen"><i class="material-icons"></i></button>
 
-          <span class="status">off</span>
+          <button class="startConnection"><i class="material-icons"></i></button>
+          <button class="stopConnection"><i class="material-icons"></i></button>
+
         </div>
         <video class="screen" autoplay playsinline poster="https://image.flaticon.com/icons/png/512/67/67170.png"></video>
       </div>
@@ -71,14 +73,14 @@
         <p>
           <ol>
             <li value="0">
-              Most operations are self-explanatory - just mouse-hover or click on stuff to see what you can do. Be sure to try the chat with links, expand, screen share, and drawing on a screen share (or on webcam).
+              Most operations are self-explanatory - <span class="notImplemented">just mouse-hover or click on stuff to see what you can do. Be sure to try the chat with links, expand, screen share, and drawing on a screen share (or on webcam).</span>
             </li>
             <li>
               One thing that isn't obvious, is that different browsers have different behaviors as to when they re-ask for permissions after you once say, "No, I don't want to turn on my Webcam", or microphone. In some cases, you have no choice but to reload the page. In some cases, you can fiddle with the browser settings for different behavior.
             </li>
             <li>
               A second thing that isn't obvious, is that there is no sign-up, login, or accounts. (Remember, no application-specific services from hosting companies!) So how do you tell who-is-who, and get rid of bad behavior?
-              <ul>
+              <ul class="notImplemented">
                 <li>You are assigned a name when you start.</li>
                 <li>After you are in the room for 15 seconds, you can change your name (by clicking on it), and you can kick out anyone who is acting badly (by clicking on their name).</li>
                 <li>The app will try to remember and re-use your name (especially a unique chosen name), but you will loose your chosen name if you get kicked out.</li>
@@ -92,9 +94,9 @@ All the generic server resources are provided by others, so this costs me nothin
         </p>
         <h3>Where?</h3>
         <ul>
-<li>The application files are served from a copy at either <a href="https://howard-stearns.github.io/conference/">github</a> or <a href="https://codepen.io/howard-stearns/pen/zVRjpz">codepen</a>, which are free services for shared code. Once your browser gets the files, nothing you do is sent to either of these servers.  Feel free to use the code - it's M.I.T. licensed.</li>
+<li>The application files are served from a copy at either <a href="https://howard-stearns.github.io/conference/">github</a> <span class="notImplemented">or <a href="https://codepen.io/howard-stearns/pen/zVRjpz">codepen</a></span>, which are free services for shared code. Once your browser gets the files, nothing you do is sent to either of these servers.  Feel free to use the code - it's M.I.T. licensed.</li>
 <li>The audio, video, and screen sharing machinery - capture, display, and transmission - is part of <a href="https://webrtc.org/start/">webRTC</a> that is built into the current version of all modern browsers. (Note that Internet Explorer is NOT a modern browser. This won't work there. The lastest version of Edge, Chrome, Firefox, Safari and Opera should all work for video. Screen sharing is not yet built into Safari, or most mobile browsers.) All the media is sent peer-to-peer, without going through any servers. (Usually. See next.)</li>
-<li>In order to send live media P2P, there's a handshake that the two browsers have to do, through a server using a protocol called "ICE". This happens behind the scenes at the start of the communications. Once the the two browsers agree on how to communicate, the ICE server usually gets out of the way. However, sometimes a user will be on a network that won't let the user talk directly with others, and the media traffic needs to pass through the ICE server, a bit like Internet traffic passes through routers. This meeting room app uses public demonstration ICE servers operated by XXX.</li>
+<li>In order to send live media P2P, there's a handshake that the two browsers have to do, through a server using a protocol called "ICE". This happens behind the scenes at the start of the communications. Once the the two browsers agree on how to communicate, the ICE server usually gets out of the way. However, sometimes a user will be on a network that won't let the user talk directly with others, and the media traffic needs to pass through the ICE server, a bit like Internet traffic passes through routers. <span class="notImplemented">This meeting room app uses public demonstration ICE servers operated by XXX.</span></li>
 <li>The application state (e.g., who is present?) is kept synchronized through a lightweight protocol called Croquet. There is also media setup and coordination (called "signalling") that is also communicated through Croquet. Both of these use very little traffic. There is a <a href="https://croquet.studio/sdk/docs/index.html">new re-imagining of Croquet</a>, and for now the authors are making the service available for demonstration purposes.</li>
         </ul>
         <h3>Who?</h3>

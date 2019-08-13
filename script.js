@@ -42,13 +42,13 @@ const LOGGING = [
     //'EXIT',
     'STATUS',
     //'construct',
-    //'negotiationneeded',
-    //'offer',
-    //'icecandidate',
-    //'answer',
+    'negotiationneeded',
+    'offer',
+    'icecandidate',
+    'answer',
     //'requestInitialization',
-    //'stream',
-    //'track'
+    'stream',
+    'track'
 ];
 // Like console.log, but conditional on whether the first arg appears in the list above.
 function log(key, ...rest) {
@@ -271,7 +271,7 @@ class MeetingView extends Croquet.View {
                     this.updateStreamInfo(stream.id, track.kind, streamKind);
                     // A browser may allow the user to stop the stream later, in
                     // which case we will receive onended for each track.
-                    track.onended = () => myAvatar.stopStream(stream, streamKind);
+                    track.onended = () => myAvatar.stopStream(stream, streamKind); // FIXME: do we really want to stop the whole stream? maybe.
                 });
                 return stream;
             })
@@ -326,12 +326,16 @@ class MediaAvatar extends Croquet.View {
         this.status = element.getElementsByClassName('status')[0];
         element.getElementsByClassName('name')[0].innerHTML = model.name;
         
-        ['startVideo', 'stopVideo', 'startAudio', 'stopAudio', 'startScreen', 'stopScreen'].forEach(label => this.buttonHandlerByClassName(label, element));
+        ['startConnection', 'stopConnection', 'startVideo', 'stopVideo', 'startAudio', 'stopAudio', 'startScreen', 'stopScreen'].forEach(label => this.buttonHandlerByClassName(label, element));
 
         if (this.isMyself) {
+            element.classList.toggle('myself');
             // We don't use a connection for our display of ourself.
             // We COULD do so, but there is no "loopback" connection type, so there would have to be a
             // distributor RTCPeerConnection and a second receiving RTCPeerConnection, and the code gets messy.
+            //
+            // Besides, who needs the extra traffic? And the behavior IS actually different: e.g., the controls to
+            // stop/start tracks effect ALL the OTHER connections.
             //
             // But the same userMedia stream is going out to everyone with sound, and displayed on our own video element,
             // So turn sound off at the element.
@@ -340,6 +344,10 @@ class MediaAvatar extends Croquet.View {
         } else {
             ['screen', 'audio', 'video'].forEach(trackKind =>
                                                  this.showTrackAvailableLocally(trackKind, this.model[trackKind]));
+            this.p2pReceive('offer', this.offer);
+            this.p2pReceive('icecandidate', this.icecandidate);
+            this.p2pReceive('answer', this.answer);
+            this.p2pReceive('requestInitialization', this.requestInitialization);
             this.setupPeerConnection();
             // Subtle: Don't subscribe to my own showTrackAvailableLocally event, as that is ONLY disabled by feature detection.
             // Some browsers, at least, let you try again after initially saying no, without reloading, so we initial refusal should not disable them.
@@ -365,7 +373,6 @@ class MediaAvatar extends Croquet.View {
     // DOM INTERACTIONS
     updateStatus(label, more) { // As signalling state changes, records progress in display and console.
         log('STATUS', this.model.name, label, more);
-        this.status.innerHTML = label;
     }
     showTrackPlayingLocally(trackKind, enabled) { // Toggle the video/audio/screen start/stop pair to be displayed, using css.
         this.element.classList[enabled ? 'add' : 'remove'](trackKind);
@@ -411,6 +418,15 @@ class MediaAvatar extends Croquet.View {
         const element = this.getButton(className, domElement);
         element.onclick = event => this[className](event)
     }
+    startConnection() { // FIXME disable this appropriately. same for stopConnection
+        this.connection.getSenders().forEach(console.log); // fixme
+        this.negotiationneeded();
+        //this.showTrackPlayingLocally('connection', true);
+    }
+    stopConnection() {
+        this.connection.close();
+        this.setupPeerConnection();
+    }
     // Track button handlers.
     startVideo() {
         this.allowTrack('video', true);
@@ -429,7 +445,6 @@ class MediaAvatar extends Croquet.View {
     }
     stopScreen() {
         this.allowTrack('screen', false);
-        // FIXME remove: this.connectStream('screen').then(stream => stream && this.stopStream(stream, 'screen'));
     }
 
     // MEDIA
@@ -505,7 +520,7 @@ class MediaAvatar extends Croquet.View {
             this.showTrackPlayingLocally(trackKind, enabled && receivers.length);
         }
     }
-    requestInitialization(streamKind) {
+    requestInitialization(streamKind) { // fixme: either make this work or kill it
         // If the other end cannot safely make an offer (e.g., user has denied media), it may request us to
         // initialize the stream (which we will do IFF we have one).
         this.connectStream(streamKind);
@@ -529,7 +544,7 @@ class MediaAvatar extends Croquet.View {
         log(event, "subscribe tramp-", this.name(this.model.userId));
         this.subscribe(this.model.userId, 'tramp-' + event, payload => {
             const concernsThisClient = this.viewId === payload.concern;
-            log(event, "received", this.name(this.model.userId), "@", this.name(payload.concern), concernsThisClient);
+            log(event, "received", this.name(this.model.userId), "@", this.name(payload.concern), concernsThisClient ? "for us" : "ignored");
             if (concernsThisClient) bound(JSON.parse(payload.message));
         });
     }
@@ -563,31 +578,18 @@ class MediaAvatar extends Croquet.View {
         this.connection.setRemoteDescription(answer);
     }
     setupPeerConnection() { // One-time setup of our end of connection and handlers, regardless of whether we shouldInitializeConnectionWithThisUser.
-        this.p2pReceive('offer', this.offer);
-        this.p2pReceive('icecandidate', this.icecandidate);
-        this.p2pReceive('answer', this.answer);
-        this.p2pReceive('requestInitialization', this.requestInitialization);
+        this.showTrackPlayingLocally('connection', false);
         
         const connection = this.connection = new RTCPeerConnection(Q.ICE_SERVERS);
         
         connection.addEventListener('connectionstatechange', event => {
-            var message = ['remote:'];
-            function info(stream) {
-                message.push(stream.id);
-                message.push(stream.active);
-                stream.getTracks().forEach(track => {
-                    message.push(track.kind);
-                    message.push(track.enabled);
-                });
+            this.showTrackPlayingLocally('connection', connection.connectionState === 'connected');
+            if (['disconnected', 'closed'].includes(connection.connectionState)) {
+                this.stopConnection();
+                //this.connection.close();
+                //this.setupPeerConnection(); // FIXME
             }
-            if (connection.connectionState === 'closed') {
-                message.push('closed');
-            } else {
-                connection.getRemoteStreams().forEach(info); // FIXME deprecated
-                message.push('local:');
-                connection.getLocalStreams().forEach(info); // FIXME deprecated
-            }
-            this.updateStatus(connection.connectionState, message.join(' '));
+            this.updateStatus(connection.connectionState);
         });
         connection.addEventListener('negotiationneeded', event => this.negotiationneeded());
         connection.addEventListener('icecandidate', event => this.p2pSend('icecandidate', event.candidate));
@@ -603,7 +605,7 @@ class MediaAvatar extends Croquet.View {
                                               stream.getTracks().find(track => 
                                                                       track.id === trackId))
                   || {id: 'no match'};
-            log('track', 'acrossPeer', track.kind, stream.id, this.name());
+            log('track', 'receiving', track.kind, stream.id, this.name());
             if (stream.id === this.model[track.kind]) {
                 this.displayStream(stream, 'webcam');
                 // Yuck: set up a trackKind => local track.id map analogous to model[streamKind] => global stream.id

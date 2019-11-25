@@ -247,7 +247,7 @@ class MeetingView extends Croquet.View {
             constraints = {};
         } else {
             getter = 'getUserMedia';
-            constraints = {video: true, audio: false} // fixme
+            constraints = {video: true, audio: true};
         }
 
         if (!navigator.mediaDevices[getter]) { // Browser feature-detect.
